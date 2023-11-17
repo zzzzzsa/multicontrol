@@ -2,6 +2,7 @@ import argparse
 import contextlib
 import logging
 import os
+os.environ['CURL_CA_BUNDLE'] = ''
 import sys
 
 

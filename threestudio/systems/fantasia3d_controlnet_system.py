@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 
 import torch
 import torch.nn.functional as F
+import cv2
 
 import threestudio
 from threestudio.systems.base import BaseLift3DSystem
@@ -9,12 +10,13 @@ from threestudio.utils.ops import binary_cross_entropy, dot
 from threestudio.utils.typing import *
 
 
-@threestudio.register("fantasia3d-system")
+@threestudio.register("fantasia3d-controlnet-system")
 class Fantasia3D(BaseLift3DSystem):
     @dataclass
     class Config(BaseLift3DSystem.Config):
         latent_steps: int = 1000
         texture: bool = False
+        cond_img: str = ""
 
     cfg: Config
 
@@ -61,13 +63,35 @@ class Fantasia3D(BaseLift3DSystem):
                 guidance_inp = torch.cat(
                     [out["comp_normal"] * 2.0 - 1.0, out["opacity"]], dim=-1
                 )
+                #threestudio.info(f"Initialize Geometry Using ControlNet with Input Image as Guidance ...")
+                guidance_inp = out["comp_normal"]
+                rgb_image = cv2.imread(self.cfg.cond_img)[:, :, ::-1].copy() / 255
+                rgb_image = torch.FloatTensor(rgb_image).unsqueeze(0)
+                #print(guidance_inp.shape[:-1])
+                #print(rgb_image.shape[:-1])
                 guidance_out = self.guidance(
-                    guidance_inp, prompt_utils, **batch, rgb_as_latents=True
+                    guidance_inp, rgb_image, prompt_utils, **batch, rgb_as_latents=False
                 )
+                # guidance_out = self.guidance(
+                #     guidance_inp, prompt_utils, **batch, rgb_as_latents=True
+                # )
+            # if isinstance(
+            #     self.guidance,
+            #     threestudio.models.guidance.controlnet_guidance.ControlNetGuidance,
+            # ) and self.cfg.cond_img != "":
+            #     threestudio.info(f"Initialize Geometry Using ControlNet with Input Image as Guidance ...")
+            #     guidance_inp = out["comp_normal"]
+            #     rgb_image = cv2.imread(self.cfg.cond_img)[:, :, ::-1].copy() / 255
+            #     rgb_image = torch.FloatTensor(rgb_image).unsqueeze(0).to(self.cfg.guidance.device)
+            #     guidance_out = self.guidance(
+            #         guidance_inp, rgb_image, prompt_utils, **batch, rgb_as_latents=False
+            #     )
             else:
                 guidance_inp = out["comp_normal"]
+                rgb_image = cv2.imread(self.cfg.cond_img)[:, :, ::-1].copy() / 255
+                rgb_image = torch.FloatTensor(rgb_image).unsqueeze(0)
                 guidance_out = self.guidance(
-                    guidance_inp, prompt_utils, **batch, rgb_as_latents=False
+                    guidance_inp, rgb_image, prompt_utils, **batch, rgb_as_latents=False
                 )
 
             loss_normal_consistency = out["mesh"].normal_consistency()
@@ -81,13 +105,13 @@ class Fantasia3D(BaseLift3DSystem):
                 self.guidance,
                 threestudio.models.guidance.controlnet_guidance.ControlNetGuidance,
             ):
-                print('using comp_normal')
+                #print('using comp_normal')
                 cond_inp = out["comp_normal"]
                 guidance_out = self.guidance(
                     guidance_inp, cond_inp, prompt_utils, **batch, rgb_as_latents=False
                 )
             else:
-                print('using comp_rgb')
+                #print('using comp_rgb')
                 guidance_out = self.guidance(
                     guidance_inp, prompt_utils, **batch, rgb_as_latents=False
                 )

@@ -1,7 +1,12 @@
 from dataclasses import dataclass, field
 
 import torch
+from torchvision.transforms import ToTensor
+import torch.nn.functional as F
+
+import cv2
 from PIL import Image
+import numpy as np
 
 import threestudio
 from threestudio.systems.base import BaseLift3DSystem
@@ -9,11 +14,11 @@ from threestudio.utils.ops import binary_cross_entropy, dot
 from threestudio.utils.typing import *
 
 
-@threestudio.register("dreamfusion-system")
+@threestudio.register("dreamfusion-controlnet-system")
 class DreamFusion(BaseLift3DSystem):
     @dataclass
     class Config(BaseLift3DSystem.Config):
-        pass
+        cond_img_path: str = ""
 
     cfg: Config
 
@@ -38,48 +43,70 @@ class DreamFusion(BaseLift3DSystem):
     def training_step(self, batch, batch_idx):
         out = self(batch)
         prompt_utils = self.prompt_processor()
-        guidance_out = self.guidance(
-            out["comp_rgb"], prompt_utils, **batch, rgb_as_latents=False, guidance_eval=True
-        )
+        #print(self.cfg.cond_img_path)
+        rgb_image = cv2.imread(self.cfg.cond_img_path)[:, :, ::-1].copy() / 255
+        rgb_image = torch.FloatTensor(rgb_image).unsqueeze(0)
+        #scaled_image = 2 * rgb_image - 1
+        
+        # print(out["comp_rgb"])
+        # print(scaled_image[0])
+        comp_rgb_img = out["comp_rgb"] * 255
+        comp_rgb_img = comp_rgb_img.byte()
+        #print(comp_rgb_img)
+        comp_rgb_img = Image.fromarray(comp_rgb_img.cpu().squeeze(0).numpy())
+        comp_rgb_img.save('comp_rgb_img.png')
 
-        # comp_rgb_img = (out["comp_rgb"] + 1) * 0.5 * 255
-        # comp_rgb_img = comp_rgb_img.byte()
-        # print(comp_rgb_img)
-        # comp_rgb_img = Image.fromarray(comp_rgb_img.cpu().squeeze(0).numpy())
-        # comp_rgb_img.save('comp_rgb_img.png')
+        # scaled_image = (scaled_image[0] + 1) * 0.5 * 255
+        # scaled_image = scaled_image.byte()
+        # print(scaled_image)
+        # scaled_image = Image.fromarray(scaled_image.cpu().squeeze(0).numpy())
+        # scaled_image.save('scaled_image.png')
+        cond_inp = out["comp_rgb"]
+        cond_inp = cond_inp.permute(0, 3, 1, 2)
+        cond_inp_resized = F.interpolate(cond_inp, (512, 512), mode="bilinear", align_corners=False)
+        cond_inp_resized = cond_inp_resized.permute(0, 2, 3, 1)
+
+        
+        print(type(prompt_utils))
+        print(list(batch.keys()))
+        print(list(out.keys()))
+        guidance_out = self.guidance(
+            cond_inp_resized, rgb_image, prompt_utils, rgb_as_latents=False, **batch
+        )
 
         loss = 0.0
 
-        guidance_eval = guidance_out.get("eval")
-        imgs_final = guidance_eval.get("imgs_final")
-        imgs_1step = guidance_eval.get("imgs_1step")
-        imgs_1orig = guidance_eval.get("imgs_1orig")
-        imgs_noisy = guidance_eval.get("imgs_noisy")
+        # guidance_eval = guidance_out.get("eval")
+        # imgs_final = guidance_eval.get("imgs_final")
+        # imgs_1step = guidance_eval.get("imgs_1step")
+        # imgs_1orig = guidance_eval.get("imgs_1orig")
+        # imgs_noisy = guidance_eval.get("imgs_noisy")
         #print(imgs_final.shape)
 
-        imgs_final = (imgs_final + 1) * 0.5 * 255
-        imgs_final = imgs_final.byte()
-        imgs_final = Image.fromarray(imgs_final.cpu().squeeze(0).numpy())
-        imgs_final.save('imgs_final.png')
+        # imgs_final = (imgs_final + 1) * 0.5 * 255
+        # imgs_final = imgs_final.byte()
+        # imgs_final = Image.fromarray(imgs_final.cpu().squeeze(0).numpy())
+        # imgs_final.save('imgs_final.png')
 
-        imgs_1step = (imgs_1step + 1) * 0.5 * 255
-        imgs_1step = imgs_1step.byte()
-        imgs_1step = Image.fromarray(imgs_1step.cpu().squeeze(0).numpy())
-        imgs_1step.save('imgs_1step.png')
+        # imgs_1step = (imgs_1step + 1) * 0.5 * 255
+        # imgs_1step = imgs_1step.byte()
+        # imgs_1step = Image.fromarray(imgs_1step.cpu().squeeze(0).numpy())
+        # imgs_1step.save('imgs_1step.png')
 
-        imgs_1orig = (imgs_1orig + 1) * 0.5 * 255
-        imgs_1orig = imgs_1orig.byte()
-        imgs_1orig = Image.fromarray(imgs_1orig.cpu().squeeze(0).numpy())
-        imgs_1orig.save('imgs_1orig.png')
+        # imgs_1orig = (imgs_1orig + 1) * 0.5 * 255
+        # imgs_1orig = imgs_1orig.byte()
+        # imgs_1orig = Image.fromarray(imgs_1orig.cpu().squeeze(0).numpy())
+        # imgs_1orig.save('imgs_1orig.png')
 
-        imgs_noisy = (imgs_noisy + 1) * 0.5 * 255
-        imgs_noisy = imgs_noisy.byte()
-        imgs_noisy = Image.fromarray(imgs_noisy.cpu().squeeze(0).numpy())
-        imgs_noisy.save('imgs_noisy.png')
-        
-        print(guidance_out.keys())
+        # imgs_noisy = (imgs_noisy + 1) * 0.5 * 255
+        # imgs_noisy = imgs_noisy.byte()
+        # imgs_noisy = Image.fromarray(imgs_noisy.cpu().squeeze(0).numpy())
+        # imgs_noisy.save('imgs_noisy.png')
+
+
+
         for name, value in guidance_out.items():
-           # self.log(f"train/{name}", value)
+            self.log(f"train/{name}", value)
             if name.startswith("loss_"):
                 loss += value * self.C(self.cfg.loss[name.replace("loss_", "lambda_")])
 
@@ -106,7 +133,7 @@ class DreamFusion(BaseLift3DSystem):
 
         for name, value in self.cfg.loss.items():
             self.log(f"train_params/{name}", self.C(value))
-
+        
         return {"loss": loss}
 
     def validation_step(self, batch, batch_idx):

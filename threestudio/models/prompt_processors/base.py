@@ -443,7 +443,7 @@ class PromptProcessor(BaseObject):
         os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
         tokenizer = AutoTokenizer.from_pretrained(
-            self.cfg.pretrained_model_name_or_path_prompt_debiasing
+                self.cfg.pretrained_model_name_or_path_prompt_debiasing
         )
         model = BertForMaskedLM.from_pretrained(
             self.cfg.pretrained_model_name_or_path_prompt_debiasing

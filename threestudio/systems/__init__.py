@@ -1,7 +1,9 @@
 from . import (
     control4d_multiview,
     dreamfusion,
+    dreamfusion_controlnet,
     fantasia3d,
+    fantasia3d_controlnet_system,
     imagedreamfusion,
     instructnerf2nerf,
     latentnerf,

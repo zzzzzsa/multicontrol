@@ -6,8 +6,9 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from controlnet_aux import CannyDetector, NormalBaeDetector
-from diffusers import ControlNetModel, DDIMScheduler, StableDiffusionControlNetPipeline, StableDiffusionControlNetImg2ImgPipeline
+from diffusers import ControlNetModel, DDIMScheduler, StableDiffusionControlNetPipeline
 from diffusers.utils.import_utils import is_xformers_available
+from diffusers.utils import load_image
 from tqdm import tqdm
 
 import threestudio
@@ -17,7 +18,7 @@ from threestudio.utils.misc import C, parse_version
 from threestudio.utils.typing import *
 
 
-@threestudio.register("stable-diffusion-controlnet-guidance")
+@threestudio.register("stable-diffusion-controlnet-img-guidance")
 class ControlNetGuidance(BaseObject):
     @dataclass
     class Config(BaseObject.Config):
@@ -286,6 +287,7 @@ class ControlNetGuidance(BaseObject):
             control = (
                 torch.from_numpy(np.array(detected_map)).float().to(self.device) / 255.0
             )
+            print(control.shape)
             control = control.unsqueeze(-1).repeat(1, 1, 3)
             control = control.unsqueeze(0)
             control = control.permute(0, 3, 1, 2)
@@ -323,11 +325,25 @@ class ControlNetGuidance(BaseObject):
             )
 
         # perform classifier-free guidance
+        # noise_pred_text, noise_pred_uncond = noise_pred.chunk(2)
+        # noise_pred = noise_pred_uncond + self.cfg.guidance_scale * (
+        #     noise_pred_text - noise_pred_uncond
+        # )
+
+        # dreamfusion guidance
         noise_pred_text, noise_pred_uncond = noise_pred.chunk(2)
-        noise_pred = noise_pred_uncond + self.cfg.guidance_scale * (
+        noise_pred = noise_pred_text + self.cfg.guidance_scale * (
             noise_pred_text - noise_pred_uncond
         )
 
+        # if self.cfg.weighting_strategy == "sds":
+        #     w = (1 - self.alphas[t]).view(-1, 1, 1, 1)
+        # elif self.cfg.weighting_strategy == "fantasia3d":
+        #     w = (self.alphas[t] ** 0.5 * (1 - self.alphas[t])).view(-1, 1, 1, 1)
+        # else:
+        #     raise ValueError(
+        #         f"Unknown weighting strategy: {self.cfg.weighting_strategy}"
+        #     )
         w = (1 - self.alphas[t]).view(-1, 1, 1, 1)
         grad = w * (noise_pred - noise)
         return grad

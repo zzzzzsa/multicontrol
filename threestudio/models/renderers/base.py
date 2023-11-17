@@ -75,6 +75,8 @@ class Renderer(BaseModule):
 class VolumeRenderer(Renderer):
     pass
 
+class ShapERenderer(Renderer):
+    pass
 
 class Rasterizer(Renderer):
     pass
