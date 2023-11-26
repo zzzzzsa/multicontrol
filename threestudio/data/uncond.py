@@ -331,6 +331,7 @@ class RandomCameraIterableDataset(IterableDataset, Updateable):
             "camera_distances": camera_distances,
             "height": self.height,
             "width": self.width,
+            "fovy": fovy,
         }
 
 

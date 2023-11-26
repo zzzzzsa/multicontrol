@@ -12,6 +12,10 @@ from threestudio.utils.misc import get_rank
 from threestudio.utils.ops import get_activation
 from threestudio.utils.typing import *
 
+from shap_e.models.renderer import Renderer
+from shap_e.util.collections import AttrDict
+from shap_e.models.download import load_model, load_config
+from shap_e.models.transmitter.base import *
 
 class ProgressiveBandFrequency(nn.Module, Updateable):
     def __init__(self, in_channels: int, config: dict):
@@ -258,7 +262,25 @@ class SphereInitVanillaMLP(nn.Module):
     def make_activation(self):
         return nn.Softplus(beta=100)
 
+class Transmitter(nn.Module):
+    def __init__(self, encoder: Encoder, renderer: Renderer):
+        super().__init__()
+        self.encoder = encoder
+        self.renderer = renderer
 
+    def forward(self, batch: AttrDict, options: Optional[AttrDict] = None) -> AttrDict:
+        """
+        Transmit the batch through the encoder and then the renderer.
+        """
+        params = self.encoder(batch, options=options)
+        return self.renderer(batch, params=params, options=options)
+
+    def make_linear(self, dim_in, dim_out, is_first, is_last):
+        raise NotImplementedError
+
+    def make_activation(self):
+        raise NotImplementedError
+    
 class TCNNNetwork(nn.Module):
     def __init__(self, dim_in: int, dim_out: int, config: dict) -> None:
         super().__init__()
