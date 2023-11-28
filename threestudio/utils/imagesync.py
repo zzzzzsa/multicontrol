@@ -13,7 +13,7 @@ import math
 
 from threestudio.utils.typing import *
 
-def get_camera_pose(position, azimuth, elevation):
+def get_camera_pose(position, azimuth, elevation, distance):
     # 确保输入是Tensor并且在GPU上
     device = azimuth.device
     azimuth_rad = azimuth * torch.pi / 180.0
@@ -32,12 +32,20 @@ def get_camera_pose(position, azimuth, elevation):
         [0, torch.sin(elevation_rad),  torch.cos(elevation_rad)]
     ], device=device)
 
-    R = torch.mm(R_elevation, R_azimuth)
+    # R = torch.mm(R_elevation, R_azimuth)
 
-    # 创建4x4变换矩阵
+    # # 创建4x4变换矩阵
+    # transform_matrix = torch.eye(4, device=device)
+    # transform_matrix[:3, :3] = R
+    # transform_matrix[:3, 3] = position
+
+    R = R_elevation @ R_azimuth
+    cam_pos = R @ torch.tensor([0, 0, distance], device=device)
+
+    # 创建变换矩阵
     transform_matrix = torch.eye(4, device=device)
     transform_matrix[:3, :3] = R
-    transform_matrix[:3, 3] = position
+    transform_matrix[:3, 3] = cam_pos + position
 
     return transform_matrix
 
@@ -161,13 +169,14 @@ def sample_image_4x4(
     height, 
     width, 
     camera_positions, 
+    camera_distances,
     elevation,
     azimuth,
     light_positions, 
     fovy,
     **kwargs,
 ):
-    camera_pose = get_camera_pose(camera_positions,azimuth,elevation)
+    camera_pose = get_camera_pose(camera_positions,azimuth,elevation,camera_distances)
     device = camera_positions.device
     #print(camera_pose)
     #light_matrix = np.eye(4)

@@ -55,8 +55,8 @@ class DreamFusion(BaseLift3DSystem):
 
         shape_img, projection_matrix = sample_image_4x4(self.cfg.mesh_path,**batch)
         #print(list(batch.keys()))
-        print(batch.get('mvp_mtx'))
-        print(projection_matrix)
+        #print(batch.get('mvp_mtx'))
+        #print(projection_matrix)
 
         comp_rgb_img = out["comp_rgb"] * 255
         comp_rgb_img = comp_rgb_img.byte()
