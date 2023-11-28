@@ -13,9 +13,15 @@ import math
 
 from threestudio.utils.typing import *
 
-def get_camera_pose(position, azimuth, elevation, distance):
-    # 确保输入是Tensor并且在GPU上
+def c2o(position):
+# change coornidate from threestudio to opengl
+    transformed_position = torch.tensor([[position[0, 1], position[0, 2], -position[0, 0]]], device=position.device)
+    return transformed_position
+
+def get_camera_pose(position, azimuth, elevation, distance, camera_pose_front):
+
     device = azimuth.device
+    camera_pose_one = torch.from_numpy(camera_pose_front).clone().to(device)
     azimuth_rad = azimuth * torch.pi / 180.0
     elevation_rad = elevation * torch.pi / 180.0
 
@@ -40,12 +46,13 @@ def get_camera_pose(position, azimuth, elevation, distance):
     # transform_matrix[:3, 3] = position
 
     R = R_elevation @ R_azimuth
-    cam_pos = R @ torch.tensor([0, 0, distance], device=device)
+    #cam_pos = R @ torch.tensor([0, 0, distance], device=device)
 
     # 创建变换矩阵
     transform_matrix = torch.eye(4, device=device)
+    transform_matrix[:3, 3] = position
+    transform_matrix = transform_matrix @ camera_pose_one.to(torch.float16)
     transform_matrix[:3, :3] = R
-    transform_matrix[:3, 3] = cam_pos + position
 
     return transform_matrix
 
@@ -176,8 +183,9 @@ def sample_image_4x4(
     fovy,
     **kwargs,
 ):
-    camera_pose = get_camera_pose(camera_positions,azimuth,elevation,camera_distances)
     device = camera_positions.device
+    print(camera_positions)
+    camera_positions = c2o(camera_positions)
     #print(camera_pose)
     #light_matrix = np.eye(4)
     light_matrix = torch.eye(4, device=device)
@@ -185,14 +193,25 @@ def sample_image_4x4(
 
     mesh = trimesh.load(mesh_path)
     centroid = mesh.bounding_box.centroid
-    transformation_matrix = np.eye(4)
-    transformation_matrix[:3, 3] = -centroid
+    centroid_matrix = np.eye(4)
+    centroid_matrix[:3, 3] = -centroid
+
+    camera_pose_front = np.array([
+    [1, 0,  0,  0],
+    [0, 1,  0,  0],
+    [0, 0,  1,  3],
+    [0, 0,  0,  1]
+    ]) 
+    
+    camera_pose = get_camera_pose(camera_positions,azimuth,elevation,camera_distances,camera_pose_front)
+
     #scene = pyrender.Scene.from_trimesh_scene(mesh)
     scene = pyrender.Scene()
 
     for m in mesh.geometry.values():
         r_mesh = pyrender.Mesh.from_trimesh(m)
-        scene.add(r_mesh, pose=transformation_matrix)
+        scene.add(r_mesh, pose=centroid_matrix)
+
     camera = pyrender.PerspectiveCamera(yfov=fovy, aspectRatio = 1.0)
     directional_light = pyrender.DirectionalLight(color=np.ones(3), intensity=3.0)
     #scene.add(directional_light, pose=light_positions)
@@ -209,7 +228,9 @@ def sample_image_4x4(
 
     r = pyrender.OffscreenRenderer(width, height)
 
-    color, depth = r.render(scene)
+    color, depth = r.render(scene, flags=pyrender.RenderFlags.RGBA)
+    color = color[..., :3] 
+
     img = Image.fromarray(color)
     img.save('/nvme/yyh/threestudio/shape_sampled_4x4matrix_img.png')
     transform = transforms.ToTensor()
@@ -217,6 +238,9 @@ def sample_image_4x4(
     shape_img = transform(img)
 
     shape_img = shape_img.to(device)
+
+    scene.remove_node(camera_node)
+    scene.remove_node(light_node)
     r.delete() 
 
     return shape_img, projection_matrix

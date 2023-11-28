@@ -418,7 +418,7 @@ class RandomCameraDataset(Dataset):
             fovy, self.cfg.eval_width / self.cfg.eval_height, 0.1, 1000.0
         )  # FIXME: hard-coded near and far
         mvp_mtx: Float[Tensor, "B 4 4"] = get_mvp_matrix(c2w, proj_mtx)
-
+        print(camera_positions)
         self.rays_o, self.rays_d = rays_o, rays_d
         self.mvp_mtx = mvp_mtx
         self.c2w = c2w

@@ -16,7 +16,7 @@ from threestudio.utils.ops import get_activation
 from threestudio.utils.typing import *
 
 
-@threestudio.register("implicit-volume")
+@threestudio.register("shape-volume")
 class ImplicitVolume(BaseImplicitGeometry):
     @dataclass
     class Config(BaseImplicitGeometry.Config):
@@ -38,7 +38,7 @@ class ImplicitVolume(BaseImplicitGeometry):
         )
         mlp_network_config: dict = field(
             default_factory=lambda: {
-                "otype": "VanillaMLP",
+                "otype": "ShapETransmitter",
                 "activation": "ReLU",
                 "output_activation": "none",
                 "n_neurons": 64,

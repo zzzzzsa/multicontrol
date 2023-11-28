@@ -1,22 +1,22 @@
+# This is depcreted experiment tyrout for merging controlnet_guidance
+
+
 from dataclasses import dataclass, field
 
 import torch
-import torch.nn.functional as F
-import csv
+from PIL import Image
 
 import threestudio
 from threestudio.systems.base import BaseLift3DSystem
 from threestudio.utils.ops import binary_cross_entropy, dot
-from threestudio.utils.misc import cleanup, get_device
 from threestudio.utils.typing import *
-from threestudio.utils.imagesync import *
 
 
-@threestudio.register("shape-1-system")
+@threestudio.register("dreamfusion-system")
 class DreamFusion(BaseLift3DSystem):
     @dataclass
     class Config(BaseLift3DSystem.Config):
-        mesh_path: str = ""
+        pass
 
     cfg: Config
 
@@ -40,54 +40,49 @@ class DreamFusion(BaseLift3DSystem):
 
     def training_step(self, batch, batch_idx):
         out = self(batch)
-        
-        # 指定你的CSV文件名
-        filename = "batch.csv"
-
-        # 写入CSV
-        with open(filename, 'w', newline='') as csvfile:
-            writer = csv.writer(csvfile)
-            # 可选：写入头部信息，例如键和值的标签
-            writer.writerow(["Key", "Value"])
-            # 写入字典键值对
-            for key, value in batch.items():
-                writer.writerow([key, value])
-
-        shape_img, projection_matrix = sample_image_4x4(self.cfg.mesh_path,**batch)
-        #print(list(batch.keys()))
-        #print(batch.get('mvp_mtx'))
-        #print(projection_matrix)
-
-        comp_rgb_img = out["comp_rgb"] * 255
-        comp_rgb_img = comp_rgb_img.byte()
-        #print(comp_rgb_img)
-        comp_rgb_img = Image.fromarray(comp_rgb_img.cpu().squeeze(0).numpy())
-        comp_rgb_img.save('comp_rgb_img.png')
-
         prompt_utils = self.prompt_processor()
         guidance_out = self.guidance(
-            out["comp_rgb"], prompt_utils, **batch, rgb_as_latents=False
+            out["comp_rgb"], prompt_utils, **batch, rgb_as_latents=False, guidance_eval=True
         )
+
+        # comp_rgb_img = (out["comp_rgb"] + 1) * 0.5 * 255
+        # comp_rgb_img = comp_rgb_img.byte()
+        # print(comp_rgb_img)
+        # comp_rgb_img = Image.fromarray(comp_rgb_img.cpu().squeeze(0).numpy())
+        # comp_rgb_img.save('comp_rgb_img.png')
 
         loss = 0.0
 
-        rendered_img = out["comp_rgb"] * 255
-        rendered_img = rendered_img.squeeze(0)
-        rendered_img = rendered_img.permute(2,0,1)
+        guidance_eval = guidance_out.get("eval")
+        imgs_final = guidance_eval.get("imgs_final")
+        imgs_1step = guidance_eval.get("imgs_1step")
+        imgs_1orig = guidance_eval.get("imgs_1orig")
+        imgs_noisy = guidance_eval.get("imgs_noisy")
+        #print(imgs_final.shape)
 
-        # if rendered_img.shape == shape_img.shape:
-        #     loss_l1 = F.l1_loss(rendered_img, shape_img)
-        # else:
-        #     raise ValueError("Images must have the same dimensions.")
-        # self.log("train/loss_l1", loss_l1)
-        # loss += loss_l1
+        imgs_final = (imgs_final + 1) * 0.5 * 255
+        imgs_final = imgs_final.byte()
+        imgs_final = Image.fromarray(imgs_final.cpu().squeeze(0).numpy())
+        imgs_final.save('imgs_final.png')
 
-        # guidance_out = {
-        #     "loss_l1": loss_l1,
-        # }
+        imgs_1step = (imgs_1step + 1) * 0.5 * 255
+        imgs_1step = imgs_1step.byte()
+        imgs_1step = Image.fromarray(imgs_1step.cpu().squeeze(0).numpy())
+        imgs_1step.save('imgs_1step.png')
+
+        imgs_1orig = (imgs_1orig + 1) * 0.5 * 255
+        imgs_1orig = imgs_1orig.byte()
+        imgs_1orig = Image.fromarray(imgs_1orig.cpu().squeeze(0).numpy())
+        imgs_1orig.save('imgs_1orig.png')
+
+        imgs_noisy = (imgs_noisy + 1) * 0.5 * 255
+        imgs_noisy = imgs_noisy.byte()
+        imgs_noisy = Image.fromarray(imgs_noisy.cpu().squeeze(0).numpy())
+        imgs_noisy.save('imgs_noisy.png')
         
+        print(guidance_out.keys())
         for name, value in guidance_out.items():
-            self.log(f"train/{name}", value)
+           # self.log(f"train/{name}", value)
             if name.startswith("loss_"):
                 loss += value * self.C(self.cfg.loss[name.replace("loss_", "lambda_")])
 
