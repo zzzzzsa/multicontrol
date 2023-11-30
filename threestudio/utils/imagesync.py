@@ -1,246 +1,168 @@
+import matplotlib.pyplot as plt
+from skimage.io import imread
 import torch
-import torchvision.transforms as transforms
-
 import numpy as np
-import trimesh
-import pyrender
+# Util function for loading meshes
+from pytorch3d.io import load_obj
 from PIL import Image
-import platform
-import os
-if platform.system() == "Linux":
-    os.environ['PYOPENGL_PLATFORM'] = 'egl'
 import math
 
+import threestudio
 from threestudio.utils.typing import *
+# Data structures and functions for rendering
+from pytorch3d.structures import Meshes
+from pytorch3d.vis.plotly_vis import AxisArgs, plot_batch_individually, plot_scene
+from pytorch3d.vis.texture_vis import texturesuv_image_matplotlib
+from pytorch3d.renderer import (
+    look_at_view_transform,
+    PointLights, 
+    DirectionalLights,
+    FoVPerspectiveCameras,
+    camera_position_from_spherical_angles, 
+    FoVOrthographicCameras, 
+    Materials, 
+    RasterizationSettings, 
+    MeshRenderer, 
+    MeshRasterizer,  
+    SoftPhongShader,
+    HardPhongShader,
+    HardFlatShader,
+    TexturesVertex,
+    TexturesAtlas,
+    PointsRenderer,
+    PointsRasterizationSettings,
+    PointsRasterizer,
+    AmbientLights,
+    BlendParams,
+    rotate_on_spot,
+)
+from pytorch3d.io import IO
+from pytorch3d.io.experimental_gltf_io import MeshGlbFormat
+from pytorch3d.transforms import axis_angle_to_matrix
+from pytorch3d.utils import ico_sphere
+from pytorch3d.vis.texture_vis import texturesuv_image_PIL
 
-def c2o(position):
-# change coornidate from threestudio to opengl
-    transformed_position = torch.tensor([[position[0, 1], position[0, 2], -position[0, 0]]], device=position.device)
-    return transformed_position
+def _render(
+    mesh: Meshes,
+    name: str,
+    dist: float = 3.0,
+    elev: float = 10.0,
+    azim: float = 0,
+    image_size: int = 256,
+    fov: float = 70.0,
+    pan=None,
+    RT=None,
+    use_ambient=False,
+):
+    device = mesh.device
+    if RT is not None:
+        R, T = RT
+    else:
+        R, T = look_at_view_transform(dist, elev, azim)
+        if pan is not None:
+            R, T = rotate_on_spot(R, T, pan)
+    cameras = FoVPerspectiveCameras(device=device, R=R, T=T, fov=fov)
+    blur_radius = 0.0
+    raster_settings = RasterizationSettings(
+        image_size=image_size, blur_radius=blur_radius, faces_per_pixel=1
+    )
 
-def get_camera_pose(position, azimuth, elevation, distance, camera_pose_front):
+    # Init shader settings
+    if use_ambient:
+        lights = AmbientLights(device=device)
+    else:
+        lights = PointLights(device=device)
+        lights.location = torch.tensor([0.0, 0.0, 2.0], device=device)[None]
 
-    device = azimuth.device
-    camera_pose_one = torch.from_numpy(camera_pose_front).clone().to(device)
-    azimuth_rad = azimuth * torch.pi / 180.0
-    elevation_rad = elevation * torch.pi / 180.0
+    blend_params = BlendParams(
+        sigma=1e-1,
+        gamma=1e-4,
+        background_color=torch.tensor([1.0, 1.0, 1.0], device=device),
+    )
+    # Init renderer
+    renderer = MeshRenderer(
+        rasterizer=MeshRasterizer(cameras=cameras, raster_settings=raster_settings),
+        shader=HardPhongShader(
+            device=device, lights=lights, cameras=cameras, blend_params=blend_params
+        ),
+    )
 
-    # 计算旋转矩阵
-    R_azimuth = torch.tensor([
-        [torch.cos(azimuth_rad), -torch.sin(azimuth_rad), 0],
-        [torch.sin(azimuth_rad),  torch.cos(azimuth_rad), 0],
-        [0,                      0,                       1]
-    ], device=device)
+    output = renderer(mesh)
 
-    R_elevation = torch.tensor([
-        [1, 0,                     0                     ],
-        [0, torch.cos(elevation_rad), -torch.sin(elevation_rad)],
-        [0, torch.sin(elevation_rad),  torch.cos(elevation_rad)]
-    ], device=device)
+    image = (output[0, ..., :3].cpu().numpy() * 255).astype(np.uint8)
 
-    # R = torch.mm(R_elevation, R_azimuth)
+    Image.fromarray(image).save(f"glb_{name}_.png")
 
-    # # 创建4x4变换矩阵
-    # transform_matrix = torch.eye(4, device=device)
-    # transform_matrix[:3, :3] = R
-    # transform_matrix[:3, 3] = position
-
-    R = R_elevation @ R_azimuth
-    #cam_pos = R @ torch.tensor([0, 0, distance], device=device)
-
-    # 创建变换矩阵
-    transform_matrix = torch.eye(4, device=device)
-    transform_matrix[:3, 3] = position
-    transform_matrix = transform_matrix @ camera_pose_one.to(torch.float16)
-    transform_matrix[:3, :3] = R
-
-    return transform_matrix
-
-def rotation_matrix_y(angle):
-    device = angle.device
-    c, s = torch.cos(angle), torch.sin(angle)
-    return torch.tensor([
-        [c,  torch.tensor(0.0, device=device), s],
-        [torch.tensor(0.0, device=device), torch.tensor(1.0, device=device), torch.tensor(0.0, device=device)],
-        [-s, torch.tensor(0.0, device=device), c]
-    ], device=device)
-
-def rotation_matrix_x(angle):
-    device = angle.device
-    c, s = torch.cos(angle), torch.sin(angle)
-    return torch.tensor([
-        [torch.tensor(1.0, device=device), torch.tensor(0.0, device=device), torch.tensor(0.0, device=device)],
-        [torch.tensor(0.0, device=device), c, -s],
-        [torch.tensor(0.0, device=device), s, c]
-    ], device=device)
-
-def get_camera_pose_cpu(position, azimuth, elevation):
-    # 将角度从度转换为弧度
-    azimuth_rad = np.radians(azimuth)
-    elevation_rad = np.radians(elevation)
-
-    # 计算旋转矩阵
-    R_azimuth = np.array([
-        [np.cos(azimuth_rad), -np.sin(azimuth_rad), 0],
-        [np.sin(azimuth_rad),  np.cos(azimuth_rad), 0],
-        [0,                    0,                   1]
-    ])
-
-    R_elevation = np.array([
-        [1, 0,                    0                   ],
-        [0, np.cos(elevation_rad), -np.sin(elevation_rad)],
-        [0, np.sin(elevation_rad),  np.cos(elevation_rad)]
-    ])
-
-    R = R_elevation @ R_azimuth
-
-    # 创建4x4变换矩阵
-    transform_matrix = np.eye(4)
-    transform_matrix[:3, :3] = R
-    transform_matrix[:3, 3] = position
-
-    return transform_matrix
-
-def rotation_matrix_y_cpu(angle):
-    c, s = np.cos(angle), np.sin(angle)
-    return np.array([
-        [c,  0, s],
-        [0,  1, 0],
-        [-s, 0, c]
-    ])
-
-def rotation_matrix_x_cpu(angle):
-    c, s = np.cos(angle), np.sin(angle)
-    return np.array([
-        [1,  0,  0],
-        [0,  c, -s],
-        [0,  s,  c]
-    ])
+    return output
 
 def sample_image(
     mesh_path, 
     height, 
     width, 
     camera_positions, 
+    camera_distances,
     elevation: Float[Tensor, "B"],
     azimuth: Float[Tensor, "B"],
     light_positions, 
     fovy,
     **kwargs,
 ):
-    device = camera_positions.device
-    rot_matrix_azimuth = rotation_matrix_y(azimuth)
-    rot_matrix_elevation = rotation_matrix_x(elevation)
-    combined_rot_matrix = rot_matrix_elevation @ rot_matrix_azimuth
+    device = azimuth.device
+    io = IO()
+    io.register_meshes_format(MeshGlbFormat())
+    mesh = io.load_mesh(mesh_path, device=device)
+    mesh.textures = TexturesVertex(0.5 * torch.ones_like(mesh.verts_padded()))
+    threestudio.info('We have {0} vertices and {1} faces.'.format(mesh._verts_list[0].shape[0], mesh._faces_list[0].shape[0]))
+    # Initialize a camera.
+    # With world coordinates +Y up, +X left and +Z in, the front of the cow is facing the -Z direction. 
+    # So we move the camera by 180 in the azimuth direction so it is facing the front of the cow. 
+    # R, T = look_at_view_transform(2.7, 0, 180) 
+    distance = camera_distances.float()
+    elevation_deg = elevation.float()
+    azimuth_deg = azimuth.float()
+    fov = fovy.float()
+    R, T = look_at_view_transform(distance, elevation_deg, azimuth_deg)
 
-    #transform_matrix = np.eye(4)
-    transform_matrix = torch.eye(4, device=device)
-    transform_matrix[:3, :3] = combined_rot_matrix
-    transform_matrix[:3, 3] = camera_positions
+    #image = _render(mesh=mesh, name="sample_image_grey", dist=distance, elev=elevation_deg, azim=azimuth_deg, image_size=height * width, fov=fov * 180 / torch.pi)
 
-    light_matrix = torch.eye(4, device=device)
-    light_matrix[:3, 3] = light_positions
+    cameras = FoVPerspectiveCameras(device=device, R=R, T=T, fov=fov * 180 / torch.pi)
 
-    mesh = trimesh.load(mesh_path)
-    scene = pyrender.Scene.from_trimesh_scene(mesh)
-    camera = pyrender.PerspectiveCamera(yfov=fovy * 180 / torch.pi)
-    directional_light = pyrender.DirectionalLight(color=np.ones(3), intensity=3.0)
-    #scene.add(directional_light, pose=light_positions)
+    # Define the settings for rasterization and shading. Here we set the output image to be of size
+    # 512x512. As we are rendering images for visualization purposes only we will set faces_per_pixel=1
+    # and blur_radius=0.0. We also set bin_size and max_faces_per_bin to None which ensure that 
+    # the faster coarse-to-fine rasterization method is used. Refer to rasterize_meshes.py for 
+    # explanations of these parameters. Refer to docs/notes/renderer.md for an explanation of 
+    # the difference between naive and coarse-to-fine rasterization. 
+    raster_settings = RasterizationSettings(
+        image_size=height, 
+        blur_radius=0.0, 
+        faces_per_pixel=1, 
+    )
 
-    transform_matrix_cpu = transform_matrix.to('cpu')
-    transform_matrix_cpu = transform_matrix_cpu.clone().numpy()
-    light_matrix_cpu = light_matrix.to('cpu')
-    light_matrix_cpu = light_matrix_cpu.clone().numpy()
+    lights = PointLights(device=device, location=[[0.0, 0.0, -3.0]])
 
-    camera_node = pyrender.Node(camera=camera, matrix=transform_matrix_cpu)
-    light_node = pyrender.Node(light=directional_light, matrix=light_matrix_cpu)
-    scene.add_node(camera_node)
-    scene.add_node(light_node)
-
-    r = pyrender.OffscreenRenderer(width, height)
-
-    color, depth = r.render(scene)
-    img = Image.fromarray(color)
-    img.save('/nvme/yyh/threestudio/shape_sampled_img.png')
-    transform = transforms.ToTensor()
-
-    shape_img = transform(img)
-
-    shape_img = shape_img.to(device)
-    r.delete() 
-
-    return shape_img
-
-def sample_image_4x4(    
-    mesh_path, 
-    height, 
-    width, 
-    camera_positions, 
-    camera_distances,
-    elevation,
-    azimuth,
-    light_positions, 
-    fovy,
-    **kwargs,
-):
-    device = camera_positions.device
-    print(camera_positions)
-    camera_positions = c2o(camera_positions)
-    #print(camera_pose)
-    #light_matrix = np.eye(4)
-    light_matrix = torch.eye(4, device=device)
-    light_matrix[:3, 3] = light_positions
-
-    mesh = trimesh.load(mesh_path)
-    centroid = mesh.bounding_box.centroid
-    centroid_matrix = np.eye(4)
-    centroid_matrix[:3, 3] = -centroid
-
-    camera_pose_front = np.array([
-    [1, 0,  0,  0],
-    [0, 1,  0,  0],
-    [0, 0,  1,  3],
-    [0, 0,  0,  1]
-    ]) 
+    renderer = MeshRenderer(
+    rasterizer=MeshRasterizer(
+        cameras=cameras, 
+        raster_settings=raster_settings
+    ),
+    shader=HardPhongShader(
+        device=device, 
+        cameras=cameras,
+        lights=lights
+    )
+    # shader=HardFlatShader(
+    #     device=device, 
+    #     cameras=cameras,
+    #     lights=lights
+    # )
     
-    camera_pose = get_camera_pose(camera_positions,azimuth,elevation,camera_distances,camera_pose_front)
+)
+    image = renderer(mesh)
+    image = (image[0, ..., :3].cpu().numpy() * 255).astype(np.uint8)
 
-    #scene = pyrender.Scene.from_trimesh_scene(mesh)
-    scene = pyrender.Scene()
+    Image.fromarray(image).save(f"glb_grey_.png")
 
-    for m in mesh.geometry.values():
-        r_mesh = pyrender.Mesh.from_trimesh(m)
-        scene.add(r_mesh, pose=centroid_matrix)
+    return image
 
-    camera = pyrender.PerspectiveCamera(yfov=fovy, aspectRatio = 1.0)
-    directional_light = pyrender.DirectionalLight(color=np.ones(3), intensity=3.0)
-    #scene.add(directional_light, pose=light_positions)
 
-    camera_pose_cpu = camera_pose.to('cpu').clone().numpy()
-    light_matrix_cpu = light_matrix.to('cpu')
-    light_matrix_cpu = light_matrix_cpu.clone().numpy()
-
-    camera_node = scene.add(camera, pose=camera_pose_cpu)
-    light_node = pyrender.Node(light=directional_light, matrix=light_matrix_cpu)
-    #scene.add_node(camera_node)
-    scene.add_node(light_node)
-    projection_matrix = camera.get_projection_matrix()
-
-    r = pyrender.OffscreenRenderer(width, height)
-
-    color, depth = r.render(scene, flags=pyrender.RenderFlags.RGBA)
-    color = color[..., :3] 
-
-    img = Image.fromarray(color)
-    img.save('/nvme/yyh/threestudio/shape_sampled_4x4matrix_img.png')
-    transform = transforms.ToTensor()
-
-    shape_img = transform(img)
-
-    shape_img = shape_img.to(device)
-
-    scene.remove_node(camera_node)
-    scene.remove_node(light_node)
-    r.delete() 
-
-    return shape_img, projection_matrix

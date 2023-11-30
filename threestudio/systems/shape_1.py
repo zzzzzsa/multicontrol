@@ -53,7 +53,7 @@ class DreamFusion(BaseLift3DSystem):
             for key, value in batch.items():
                 writer.writerow([key, value])
 
-        shape_img, projection_matrix = sample_image_4x4(self.cfg.mesh_path,**batch)
+        shape_img = sample_image(self.cfg.mesh_path,**batch)
         #print(list(batch.keys()))
         #print(batch.get('mvp_mtx'))
         #print(projection_matrix)
