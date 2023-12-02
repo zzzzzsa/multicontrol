@@ -15,4 +15,5 @@ from . import (
     zero123,
     zero123_simple,
     shape_1,
+    shape_controlnet,
 )

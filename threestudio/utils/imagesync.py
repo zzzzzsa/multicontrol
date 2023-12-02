@@ -112,17 +112,18 @@ def sample_image(
     io.register_meshes_format(MeshGlbFormat())
     mesh = io.load_mesh(mesh_path, device=device)
     mesh.textures = TexturesVertex(0.5 * torch.ones_like(mesh.verts_padded()))
-    threestudio.info('We have {0} vertices and {1} faces.'.format(mesh._verts_list[0].shape[0], mesh._faces_list[0].shape[0]))
+    #threestudio.info('We have {0} vertices and {1} faces.'.format(mesh._verts_list[0].shape[0], mesh._faces_list[0].shape[0]))
     # Initialize a camera.
     # With world coordinates +Y up, +X left and +Z in, the front of the cow is facing the -Z direction. 
     # So we move the camera by 180 in the azimuth direction so it is facing the front of the cow. 
     # R, T = look_at_view_transform(2.7, 0, 180) 
-    distance = camera_distances.float()
+    distance = camera_distances * 2
     elevation_deg = elevation.float()
     azimuth_deg = azimuth.float()
     fov = fovy.float()
-    R, T = look_at_view_transform(distance, elevation_deg, azimuth_deg)
-
+    R, T = look_at_view_transform(dist=distance, elev=elevation_deg, azim=azimuth_deg)
+    # print(R)
+    # print(T)
     #image = _render(mesh=mesh, name="sample_image_grey", dist=distance, elev=elevation_deg, azim=azimuth_deg, image_size=height * width, fov=fov * 180 / torch.pi)
 
     cameras = FoVPerspectiveCameras(device=device, R=R, T=T, fov=fov * 180 / torch.pi)
@@ -134,9 +135,10 @@ def sample_image(
     # explanations of these parameters. Refer to docs/notes/renderer.md for an explanation of 
     # the difference between naive and coarse-to-fine rasterization. 
     raster_settings = RasterizationSettings(
-        image_size=height, 
+        image_size=512, 
         blur_radius=0.0, 
         faces_per_pixel=1, 
+        perspective_correct=False,
     )
 
     lights = PointLights(device=device, location=[[0.0, 0.0, -3.0]])
