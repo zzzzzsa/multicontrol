@@ -34,6 +34,8 @@ class SolidColorBackground(BaseBackground):
             )
 
     def forward(self, dirs: Float[Tensor, "B H W 3"]) -> Float[Tensor, "B H W Nc"]:
+        print(dirs)
+        print(self.cfg.n_output_dims)
         color = (
             torch.ones(*dirs.shape[:-1], self.cfg.n_output_dims).to(dirs)
             * self.env_color

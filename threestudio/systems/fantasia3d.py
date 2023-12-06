@@ -7,6 +7,7 @@ import threestudio
 from threestudio.systems.base import BaseLift3DSystem
 from threestudio.utils.ops import binary_cross_entropy, dot
 from threestudio.utils.typing import *
+from PIL import Image
 
 
 @threestudio.register("fantasia3d-system")
@@ -77,6 +78,11 @@ class Fantasia3D(BaseLift3DSystem):
             )
         else:  # texture training
             guidance_inp = out["comp_rgb"]
+            print_rgb_img = out["comp_rgb"] * 255
+            print_rgb_img = print_rgb_img.byte()
+            #print(comp_rgb_img)
+            print_rgb_img = Image.fromarray(print_rgb_img.cpu().squeeze(0).numpy())
+            print_rgb_img.save('fantasia_texture_print_rgb_img.png')
             if isinstance(
                 self.guidance,
                 threestudio.models.guidance.controlnet_guidance.ControlNetGuidance,

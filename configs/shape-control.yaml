@@ -17,25 +17,22 @@ data:
 
 system_type: "shape-controlnet-system"
 system:
-  mesh_path: "/nvme/yyh/threestudio/load/shapes/3d_cake.glb"
+  mesh_path: "/nvme/yyh/threestudio/load/shapes/3d_cake.obj"
   geometry_type: "implicit-volume"
   geometry:
     radius: 2.0
     normal_type: "analytic"
-
     # the density initialization proposed in the DreamFusion paper
     # does not work very well
     # density_bias: "blob_dreamfusion"
     # density_activation: exp
     # density_blob_scale: 5.
     # density_blob_std: 0.2
-
     # use Magic3D density initialization instead
     density_bias: "blob_magic3d"
     density_activation: softplus
     density_blob_scale: 10.
     density_blob_std: 0.5
-
     # coarse to fine hash grid encoding
     # to ensure smooth analytic normals
     pos_encoding_config:
@@ -48,7 +45,42 @@ system:
       start_level: 8 # resolution ~200
       start_step: 2000
       update_steps: 500
+  nvdiff_renderer_type: "nvdiff-rasterizer"
+  nvdiff_renderer:
+    context_type: cuda
 
+  geometry_convert_inherit_texture: true
+  mesh_geometry_type: "custom-mesh"
+  mesh_geometry:
+    shape_init: ???
+    shape_init_params: 1.0
+    radius: 1.0 # consistent with coarse
+    pos_encoding_config:
+      otype: HashGrid
+      n_levels: 16
+      n_features_per_level: 2
+      log2_hashmap_size: 19
+      base_resolution: 16
+      per_level_scale: 1.4472692374403782 # max resolution 4096
+
+  mesh_fitting_geometry_type: "mesh-fitting-obj-mesh"
+  mesh_fitting_geometry:
+    shape_init: ???
+    shape_init_params: 1.0
+    shape_init_mesh_up: "+y"
+    shape_init_mesh_front: "-z"
+  mesh_fitting_material_type: "diffuse-with-point-light-material"
+  mesh_fitting_material:
+    ambient_only_steps: 0
+    soft_shading: true
+  mesh_fitting_background_type: "solid-color-background"
+  mesh_fitting_background:
+    n_output_dims: 3
+    color: [0, 0, 0]
+  mesh_fitting_renderer_type: "mesh-fitting-renderer"
+  mesh_fitting_renderer:
+    context_type: cuda
+    
   material_type: "diffuse-with-point-light-material"
   material:
     ambient_only_steps: 2001
@@ -91,7 +123,8 @@ system:
     lambda_orient: [0, 10., 1000., 5000]
     lambda_sparsity: 1.
     lambda_opaque: 0.
-  
+    lambda_l1: 1.
+
   optimizer:
     name: Adam
     args:
@@ -100,7 +133,7 @@ system:
       eps: 1.e-15
     params:
       geometry:
-        lr: 0.01
+        lr: 0.001
       background:
         lr: 0.001
 

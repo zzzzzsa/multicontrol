@@ -8,4 +8,5 @@ from . import (
     stable_diffusion_vsd_guidance,
     zero123_guidance,
     zero123_unified_guidance,
+    mesh_guidance,
 )

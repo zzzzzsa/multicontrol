@@ -6,4 +6,5 @@ from . import (
     tetrahedra_sdf_grid,
     volume_grid,
     yyh_volume,
+    obj_mesh,
 )
