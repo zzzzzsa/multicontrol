@@ -26,13 +26,19 @@ ValidScale = Union[Tuple[float, float], Num[Tensor, "2 D"]]
 def scale_tensor(
     dat: Num[Tensor, "... D"], inp_scale: ValidScale, tgt_scale: ValidScale
 ):
+    device = dat.device
     if inp_scale is None:
         inp_scale = (0, 1)
     if tgt_scale is None:
         tgt_scale = (0, 1)
+
+    # 将inp_scale转换为相同设备上的张量
+    inp_scale_min = inp_scale[0].to(device)
+    inp_scale_max = inp_scale[1].to(device)
+
     if isinstance(tgt_scale, Tensor):
         assert dat.shape[-1] == tgt_scale.shape[-1]
-    dat = (dat - inp_scale[0]) / (inp_scale[1] - inp_scale[0])
+    dat = (dat - inp_scale_min) / (inp_scale_max - inp_scale_min)
     dat = dat * (tgt_scale[1] - tgt_scale[0]) + tgt_scale[0]
     return dat
 

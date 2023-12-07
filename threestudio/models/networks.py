@@ -176,6 +176,8 @@ class VanillaMLP(nn.Module):
         self.output_activation = get_activation(config.get("output_activation", None))
 
     def forward(self, x):
+        x = x.to(next(self.parameters()).device)  # 确保 x 在与模型参数相同的设备上
+
         # disable autocast
         # strange that the parameters will have empty gradients if autocast is enabled in AMP
         with torch.cuda.amp.autocast(enabled=False):

@@ -42,6 +42,7 @@ class MeshRenderer(Rasterizer):
     ) -> Dict[str, Any]:
         batch_size = mvp_mtx.shape[0]
         mesh = self.geometry.isosurface()
+        #print(type(mesh))
 
         v_pos_clip: Float[Tensor, "B Nv 4"] = self.ctx.vertex_transform(
             mesh.v_pos, mvp_mtx

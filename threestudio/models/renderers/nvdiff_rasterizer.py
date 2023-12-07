@@ -41,6 +41,7 @@ class NVDiffRasterizer(Rasterizer):
         render_rgb: bool = True,
         **kwargs
     ) -> Dict[str, Any]:
+        device = camera_positions.device
         batch_size = mvp_mtx.shape[0]
         mesh = self.geometry.isosurface()
 
@@ -84,7 +85,7 @@ class NVDiffRasterizer(Rasterizer):
 
             extra_geo_info = {}
             if self.material.requires_normal:
-                extra_geo_info["shading_normal"] = gb_normal[selector]
+                extra_geo_info["shading_normal"] = gb_normal[selector].to(device)
             if self.material.requires_tangent:
                 gb_tangent, _ = self.ctx.interpolate_one(
                     mesh.v_tng, rast, mesh.t_pos_idx

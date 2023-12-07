@@ -50,8 +50,9 @@ class DiffuseWithPointLightMaterial(BaseMaterial):
         shading: Optional[str] = None,
         **kwargs,
     ) -> Float[Tensor, "B ... 3"]:
+        device = positions.device
         albedo = get_activation(self.cfg.albedo_activation)(features[..., :3])
-
+        albedo = albedo.to(device)
         if ambient_ratio is not None:
             # if ambient ratio is specified, use it
             diffuse_light_color = (1 - ambient_ratio) * torch.ones_like(
@@ -74,6 +75,8 @@ class DiffuseWithPointLightMaterial(BaseMaterial):
         light_directions: Float[Tensor, "B ... 3"] = F.normalize(
             light_positions - positions, dim=-1
         )
+        diffuse_light_color = diffuse_light_color.to(device)
+        ambient_light_color = ambient_light_color.to(device)
         diffuse_light: Float[Tensor, "B ... 3"] = (
             dot(shading_normal, light_directions).clamp(min=0.0) * diffuse_light_color
         )

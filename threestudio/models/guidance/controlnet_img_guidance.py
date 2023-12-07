@@ -461,8 +461,8 @@ class ControlNetGuidance(BaseObject):
     ):
         batch_size, H, W, _ = rgb.shape
         assert batch_size == 1
-        print(rgb.shape)
-        print(cond_rgb.shape)
+        #print(rgb.shape)
+        #print(cond_rgb.shape)
         if Use_cond: 
             assert rgb.shape[:-1] == cond_rgb.shape[:-1]
 
