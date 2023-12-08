@@ -57,6 +57,7 @@ class MeshRenderer(Rasterizer):
         gb_pos, _ = self.ctx.interpolate_one(mesh.v_pos, rast, mesh.t_pos_idx)
         gb_viewdirs = F.normalize(gb_pos - camera_positions[:, None, None, :], dim=-1)
         gb_rgb_bg = self.background(dirs=gb_viewdirs)
+        gb_rgb_bg = gb_rgb_bg.to(gb_rgb_fg.device)
         gb_rgb = torch.lerp(gb_rgb_bg, gb_rgb_fg, mask.float())
         gb_rgb_aa = self.ctx.antialias(gb_rgb, rast, v_pos_clip, mesh.t_pos_idx)
 

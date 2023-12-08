@@ -58,10 +58,11 @@ class NeuralEnvironmentMapBackground(BaseBackground):
             and self.cfg.random_aug
             and random.random() < self.cfg.random_aug_prob
         ):
-            # use random background color with probability random_aug_prob
+            #use random background color with probability random_aug_prob
             color = color * 0 + (  # prevent checking for unused parameters in DDP
                 torch.rand(dirs.shape[0], 1, 1, self.cfg.n_output_dims)
                 .to(dirs)
                 .expand(*dirs.shape[:-1], -1)
             )
+            #color = color * 0
         return color

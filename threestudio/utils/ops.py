@@ -7,7 +7,8 @@ import torch.nn.functional as F
 from igl import fast_winding_number_for_meshes, point_mesh_squared_distance, read_obj
 from torch.autograd import Function
 from torch.cuda.amp import custom_bwd, custom_fwd
-
+from scipy.spatial.transform import Rotation as R
+import math
 import threestudio
 from threestudio.utils.typing import *
 
@@ -318,6 +319,91 @@ def tet_sdf_diff(
     )
     return sdf_diff
 
+def creat4view_from_batch(camera_positions, fovy, width, height, **kwargs):
+    device = camera_positions.device
+    camera_positions_0 = camera_positions
+    rotation_axis = torch.tensor([0, 0, 1], device=device)
+    rotation_angle = math.pi / 2 
+
+    def create_rotation_matrix(angle, axis):
+        cos_a = torch.cos(torch.tensor(angle))
+        sin_a = torch.sin(torch.tensor(angle))
+        #axis = axis / torch.norm(axis)
+        x, y, z = axis
+        return torch.tensor([
+            [cos_a + x*x*(1-cos_a), x*y*(1-cos_a) - z*sin_a, x*z*(1-cos_a) + y*sin_a],
+            [y*x*(1-cos_a) + z*sin_a, cos_a + y*y*(1-cos_a), y*z*(1-cos_a) - x*sin_a],
+            [z*x*(1-cos_a) - y*sin_a, z*y*(1-cos_a) + x*sin_a, cos_a + z*z*(1-cos_a)]
+        ], device=device)
+
+
+    rotated_positions = []
+    for i in range(4):
+        rot_matrix = create_rotation_matrix(rotation_angle * i, rotation_axis)
+        rotated_pos = torch.matmul(camera_positions_0, rot_matrix.T)
+        rotated_positions.append(rotated_pos) # 转换为NumPy数组用于绘图
+
+    mvp_mtxs = []
+    rays_o_list = []
+    rays_d_list = []
+    for camera_positions in rotated_positions:
+        # default scene center at origin
+        center: Float[Tensor, "B 3"] = torch.zeros_like(camera_positions)
+        # default camera up direction as +z
+        up: Float[Tensor, "B 3"] = torch.as_tensor([0, 0, 1], dtype=torch.float32)[
+            None, :
+        ].repeat(1, 1)
+
+
+        # sample center perturbations from a normal distribution with mean 0 and std center_perturb
+        center_perturb: Float[Tensor, "B 3"] = (
+            torch.randn(1, 3) * 0.2
+        )
+        center = center + center_perturb.to(device)
+        # sample up perturbations from a normal distribution with mean 0 and std up_perturb
+        up_perturb: Float[Tensor, "B 3"] = (
+            torch.randn(1, 3) * 0.02
+        )
+        up = up.to(device) + up_perturb.to(device)
+
+        fovy = fovy
+
+        lookat: Float[Tensor, "B 3"] = F.normalize(center - camera_positions, dim=-1)
+        right: Float[Tensor, "B 3"] = F.normalize(torch.cross(lookat, up), dim=-1)
+        up = F.normalize(torch.cross(right, lookat), dim=-1)
+        c2w3x4: Float[Tensor, "B 3 4"] = torch.cat(
+            [torch.stack([right, up, -lookat], dim=-1), camera_positions[:, :, None]],
+            dim=-1,
+        )
+        c2w: Float[Tensor, "B 4 4"] = torch.cat(
+            [c2w3x4, torch.zeros_like(c2w3x4[:, :1])], dim=1
+        )
+        c2w[:, 3, 3] = 1.0
+
+        directions_unit_focals =  get_ray_directions(H=height, W=width, focal=1.0)
+        # get directions by dividing directions_unit_focal by focal length
+        focal_length: Float[Tensor, "B"] = 0.5 * height / torch.tan(0.5 * fovy)
+        focal_length = focal_length.to(device)
+        directions: Float[Tensor, "B H W 3"] = directions_unit_focals[
+            None, :, :, :
+        ].repeat(1, 1, 1, 1)
+        directions = directions.to(device)
+        directions[:, :, :, :2] = (
+            directions[:, :, :, :2] / focal_length[:, None, None, None]
+        )
+
+        # Importance note: the returned rays_d MUST be normalized!
+        rays_o, rays_d = get_rays(directions, c2w, keepdim=True)
+        rays_o_list.append(rays_o)
+        rays_d_list.append(rays_d)
+        proj_mtx: Float[Tensor, "B 4 4"] = get_projection_matrix(
+            fovy, width / height, 0.1, 1000.0
+        )  # FIXME: hard-coded near and far
+        mvp_mtx: Float[Tensor, "B 4 4"] = get_mvp_matrix(c2w.to(device), proj_mtx.to(device))
+
+        mvp_mtxs.append(mvp_mtx)
+    
+    return rays_o_list,rays_d_list,rotated_positions,mvp_mtxs
 
 # Implementation from Latent-NeRF
 # https://github.com/eladrich/latent-nerf/blob/f49ecefcd48972e69a28e3116fe95edf0fac4dc8/src/latent_nerf/models/mesh_utils.py

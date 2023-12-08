@@ -10,7 +10,7 @@ import numpy as np
 
 import threestudio
 from threestudio.systems.base import BaseLift3DSystem
-from threestudio.utils.ops import binary_cross_entropy, dot
+from threestudio.utils.ops import binary_cross_entropy, dot, creat4view_from_batch
 from threestudio.utils.typing import *
 from threestudio.utils.imagesync import *
 from threestudio.models.geometry.base import BaseExplicitGeometry
@@ -22,6 +22,7 @@ from threestudio.utils.rasterize import NVDiffRasterizerContext
 from threestudio.models.background.base import BaseBackground
 from threestudio.models.geometry.base import BaseImplicitGeometry
 from threestudio.models.materials.base import BaseMaterial
+import csv
 import trimesh
 import os
 
@@ -85,151 +86,293 @@ class DreamFusion(BaseLift3DSystem):
         self.guidance = threestudio.find(self.cfg.guidance_type)(self.cfg.guidance)
 
     def training_step(self, batch, batch_idx):
-        # if self.true_global_step < 1000:
-        #     if self.true_global_step == 1:
-        #         threestudio.info("Using L1 loss simulating implicit representatoin of given mesh...")
-        #     guide_rgb = self.mesh_renderer(**batch)
-        #     guide_rgb_save = guide_rgb["comp_rgb"] * 255
+        if self.true_global_step < 200:
+            if self.true_global_step == 0:
+                threestudio.info("Using L1 loss simulating implicit representatoin of given mesh...")
+
+            out = self(batch)
+            prompt_utils = self.prompt_processor()
+            guide_rgb = self.mesh_renderer(**batch)
+            # guide_rgb_save = guide_rgb["comp_rgb"] * 255
             
-        #     guide_rgb_save = guide_rgb_save.byte()
-        #     #print(comp_rgb_img)
-        #     guide_rgb_save = Image.fromarray(guide_rgb_save.cpu().squeeze(0).numpy())
-        #     guide_rgb_save.save('guide_rgb_save.png')
+            # guide_rgb_save = guide_rgb_save.byte()
+            #print(comp_rgb_img)
+            # guide_rgb_save = Image.fromarray(guide_rgb_save.cpu().squeeze(0).numpy())
+            # guide_rgb_save.save('guide_rgb_save.png')
             
 
-        #     rgb = self.nvdiff_renderer(**batch)
-        #     rgb_save = rgb["comp_rgb"] * 255
+            # rgb = self.nvdiff_renderer(**batch)
+            # rgb_save = rgb["comp_rgb"] * 255
             
-        #     rgb_save = rgb_save.byte()
-        #     #print(comp_rgb_img)
-        #     rgb_save = Image.fromarray(rgb_save.cpu().squeeze(0).numpy())
-        #     rgb_save.save('rgb_save.png')
+            # rgb_save = rgb_save.byte()
+            # #print(comp_rgb_img)
+            # rgb_save = Image.fromarray(rgb_save.cpu().squeeze(0).numpy())
+            # rgb_save.save('rgb_save.png')
 
-        #     guidance_out = {"loss_l1": F.l1_loss(rgb["comp_rgb"], guide_rgb["comp_rgb"])}
-        #     loss = 0.0
-        #     for name, value in guidance_out.items():
-        #         self.log(f"train/{name}", value)
-        #         if name.startswith("loss_"):
-        #             loss += value * self.C(self.cfg.loss[name.replace("loss_", "lambda_")])
+            guidance_out = {"loss_l1": F.l1_loss(out["comp_rgb"], guide_rgb["comp_rgb"])}
+            loss = 0.0
+            for name, value in guidance_out.items():
+                self.log(f"train/{name}", value)
+                if name.startswith("loss_"):
+                    loss += value * self.C(self.cfg.loss[name.replace("loss_", "lambda_")])
 
-        #     for name, value in self.cfg.loss.items():
-        #         self.log(f"train_params/{name}", self.C(value))
+            for name, value in self.cfg.loss.items():
+                self.log(f"train_params/{name}", self.C(value))
 
-        #     return {"loss": loss}
+            return {"loss": loss}
         
-        # else:
-        out = self(batch)
-        prompt_utils = self.prompt_processor()
-        #print(self.cfg.cond_img_path)
-        # rgb_image = cv2.imread(self.cfg.cond_img_path)[:, :, ::-1].copy() / 255
-        # rgb_image = torch.FloatTensor(rgb_image).unsqueeze(0)
-        #scaled_image = 2 * rgb_image - 1
-        
-        # print(out["comp_rgb"])
-        # print(scaled_image[0])
-        comp_rgb_img = out["comp_rgb"] * 255
-        comp_rgb_img = comp_rgb_img.byte()
-        #print(comp_rgb_img)
-        comp_rgb_img = Image.fromarray(comp_rgb_img.cpu().squeeze(0).numpy())
-        comp_rgb_img.save('comp_rgb_img.png')
+        elif self.true_global_step < 2000 and self.true_global_step >= 200:
+            if self.true_global_step == 200:
+                threestudio.info("Using mesh 4 view as controlnet guidance input...")
 
-        # scaled_image = (scaled_image[0] + 1) * 0.5 * 255
-        # scaled_image = scaled_image.byte()
-        # print(scaled_image)
-        # scaled_image = Image.fromarray(scaled_image.cpu().squeeze(0).numpy())
-        # scaled_image.save('scaled_image.png')
-        cond_inp = out["comp_rgb"]
-        cond_inp = cond_inp.permute(0, 3, 1, 2)
-        cond_inp_resized = F.interpolate(cond_inp, (512, 512), mode="bilinear", align_corners=False)
-        cond_inp_resized = cond_inp_resized.permute(0, 2, 3, 1)
+            prompt_utils = self.prompt_processor()
+            # 4view nerf renderer
+            nerf_rays_o_list,nerf_rays_d_list,nerf_mv_camera_positions,nerf_mvp_mtxs = creat4view_from_batch(**batch)
 
-        render_batch = batch.copy()
-        render_batch['height'] = 512
-        render_batch['width'] = 512
-        guide_rgb = self.mesh_renderer(**render_batch)
-        guide_rgb_save = guide_rgb["comp_rgb"] * 255
-        
-        guide_rgb_save = guide_rgb_save.byte()
-        #print(comp_rgb_img)
-        guide_rgb_save = Image.fromarray(guide_rgb_save.cpu().squeeze(0).numpy())
-        guide_rgb_save.save('guide_rgb_save.png')
+            nerf_sliced_pics = []
 
-        # control_inp = sample_image(self.cfg.mesh_path,**batch)
-        # control_inp = torch.from_numpy(control_inp)
-        # control_inp = control_inp.unsqueeze(0)
+            for i in range(4):
+                temp_batch = batch.copy()
+                temp_batch["rays_o"] = nerf_rays_o_list[i]
+                temp_batch["rays_d"] = nerf_rays_d_list[i]
+                temp_batch["camera_positions"] = nerf_mv_camera_positions[i]
+                temp_batch["mvp_mtx"] = nerf_mvp_mtxs[i]
+                sliced_pic = self.renderer(**temp_batch)
+                nerf_sliced_pics.append(sliced_pic["comp_rgb"])
 
-        # print(type(prompt_utils))
-        # print(list(batch.keys()))
-        # print(list(out.keys()))
-        
+            row1 = torch.cat([nerf_sliced_pics[0], nerf_sliced_pics[1]], dim=2)  # 水平拼接
+            row2 = torch.cat([nerf_sliced_pics[2], nerf_sliced_pics[3]], dim=2)  # 水平拼接
+            nerf_combined_img = torch.cat([row1, row2], dim=1)  # 垂直拼接
+            #print(combined_img.shape)
+            nerf_combined_img_resized = nerf_combined_img.permute(0, 3, 1, 2)
+            nerf_combined_img_resized = F.interpolate(nerf_combined_img_resized, (512, 512), mode="bilinear", align_corners=False)
+            nerf_combined_img_resized = nerf_combined_img_resized.permute(0, 2, 3, 1)
 
 
+            #4view mesh render
+            rays_o,rays_d,mv_camera_positions,mvp_mtxs = creat4view_from_batch(**batch)
+            sliced_pics = []
+            for i in range(4):
+                temp_batch = batch.copy()
+                temp_batch["camera_positions"] = mv_camera_positions[i]
+                temp_batch["mvp_mtx"] = mvp_mtxs[i]
+                sliced_pic = self.mesh_renderer(**temp_batch)
+                sliced_pics.append(sliced_pic)
+            row1 = torch.cat([sliced_pics[0]["comp_rgb"], sliced_pics[1]["comp_rgb"]], dim=2)  # 水平拼接
+            row2 = torch.cat([sliced_pics[2]["comp_rgb"], sliced_pics[3]["comp_rgb"]], dim=2)  # 水平拼接
+            combined_img = torch.cat([row1, row2], dim=1)  # 垂直拼接
+            combined_img_resized = combined_img.permute(0, 3, 1, 2)
+            combined_img_resized = F.interpolate(combined_img_resized, (512, 512), mode="bilinear", align_corners=False)
+            combined_img_resized = combined_img_resized.permute(0, 2, 3, 1)
 
-        guidance_out = self.guidance(
-            cond_inp_resized, guide_rgb["comp_rgb"], prompt_utils, rgb_as_latents=False, **batch
-        )
+            guidance_out = self.guidance(
+                nerf_combined_img_resized, combined_img_resized, prompt_utils, rgb_as_latents=False, **batch
+            )
+            loss = 0.0
 
-        loss = 0.0
+            for name, value in guidance_out.items():
+                self.log(f"train/{name}", value)
+                if name.startswith("loss_"):
+                    loss += value * self.C(self.cfg.loss[name.replace("loss_", "lambda_")])
 
-        # guidance_eval = guidance_out.get("eval")
-        # imgs_final = guidance_eval.get("imgs_final")
-        # imgs_1step = guidance_eval.get("imgs_1step")
-        # imgs_1orig = guidance_eval.get("imgs_1orig")
-        # imgs_noisy = guidance_eval.get("imgs_noisy")
-        #print(imgs_final.shape)
+            # if self.C(self.cfg.loss.lambda_orient) > 0:
+            #     if "normal" not in out:
+            #         raise ValueError(
+            #             "Normal is required for orientation loss, no normal is found in the output."
+            #         )
+            #     loss_orient = (
+            #         out["weights"].detach()
+            #         * dot(out["normal"], out["t_dirs"]).clamp_min(0.0) ** 2
+            #     ).sum() / (out["opacity"] > 0).sum()
+            #     self.log("train/loss_orient", loss_orient)
+            #     loss += loss_orient * self.C(self.cfg.loss.lambda_orient)
 
-        # imgs_final = (imgs_final + 1) * 0.5 * 255
-        # imgs_final = imgs_final.byte()
-        # imgs_final = Image.fromarray(imgs_final.cpu().squeeze(0).numpy())
-        # imgs_final.save('imgs_final.png')
+            # loss_sparsity = (out["opacity"] ** 2 + 0.01).sqrt().mean()
+            # self.log("train/loss_sparsity", loss_sparsity)
+            # loss += loss_sparsity * self.C(self.cfg.loss.lambda_sparsity)
 
-        # imgs_1step = (imgs_1step + 1) * 0.5 * 255
-        # imgs_1step = imgs_1step.byte()
-        # imgs_1step = Image.fromarray(imgs_1step.cpu().squeeze(0).numpy())
-        # imgs_1step.save('imgs_1step.png')
+            # opacity_clamped = out["opacity"].clamp(1.0e-3, 1.0 - 1.0e-3)
+            # loss_opaque = binary_cross_entropy(opacity_clamped, opacity_clamped)
+            # self.log("train/loss_opaque", loss_opaque)
+            # loss += loss_opaque * self.C(self.cfg.loss.lambda_opaque)
 
-        # imgs_1orig = (imgs_1orig + 1) * 0.5 * 255
-        # imgs_1orig = imgs_1orig.byte()
-        # imgs_1orig = Image.fromarray(imgs_1orig.cpu().squeeze(0).numpy())
-        # imgs_1orig.save('imgs_1orig.png')
-
-        # imgs_noisy = (imgs_noisy + 1) * 0.5 * 255
-        # imgs_noisy = imgs_noisy.byte()
-        # imgs_noisy = Image.fromarray(imgs_noisy.cpu().squeeze(0).numpy())
-        # imgs_noisy.save('imgs_noisy.png')
-
+            for name, value in self.cfg.loss.items():
+                self.log(f"train_params/{name}", self.C(value))
+            
+            return {"loss": loss}
 
 
-        for name, value in guidance_out.items():
-            self.log(f"train/{name}", value)
-            if name.startswith("loss_"):
-                loss += value * self.C(self.cfg.loss[name.replace("loss_", "lambda_")])
+        elif self.true_global_step > 2000:
+            out = self(batch)
+            prompt_utils = self.prompt_processor()
+            #print(self.cfg.cond_img_path)
+            # rgb_image = cv2.imread(self.cfg.cond_img_path)[:, :, ::-1].copy() / 255
+            # rgb_image = torch.FloatTensor(rgb_image).unsqueeze(0)
+            #scaled_image = 2 * rgb_image - 1
+            
+            # print(out["comp_rgb"])
+            # print(scaled_image[0])
+            # comp_rgb_img = out["comp_rgb"] * 255
+            # comp_rgb_img = comp_rgb_img.byte()
+            # #print(comp_rgb_img)
+            # comp_rgb_img = Image.fromarray(comp_rgb_img.cpu().squeeze(0).numpy())
+            # comp_rgb_img.save('comp_rgb_img.png')
 
-        if self.C(self.cfg.loss.lambda_orient) > 0:
-            if "normal" not in out:
-                raise ValueError(
-                    "Normal is required for orientation loss, no normal is found in the output."
-                )
-            loss_orient = (
-                out["weights"].detach()
-                * dot(out["normal"], out["t_dirs"]).clamp_min(0.0) ** 2
-            ).sum() / (out["opacity"] > 0).sum()
-            self.log("train/loss_orient", loss_orient)
-            loss += loss_orient * self.C(self.cfg.loss.lambda_orient)
+            rays_o_list,rays_d_list,mv_camera_positions,mvp_mtxs = creat4view_from_batch(**batch)
 
-        loss_sparsity = (out["opacity"] ** 2 + 0.01).sqrt().mean()
-        self.log("train/loss_sparsity", loss_sparsity)
-        loss += loss_sparsity * self.C(self.cfg.loss.lambda_sparsity)
+            sliced_pics = []
 
-        opacity_clamped = out["opacity"].clamp(1.0e-3, 1.0 - 1.0e-3)
-        loss_opaque = binary_cross_entropy(opacity_clamped, opacity_clamped)
-        self.log("train/loss_opaque", loss_opaque)
-        loss += loss_opaque * self.C(self.cfg.loss.lambda_opaque)
+            for i in range(4):
+                temp_batch = batch.copy()
+                temp_batch["rays_o"] = rays_o_list[i]
+                temp_batch["rays_d"] = rays_d_list[i]
+                temp_batch["camera_positions"] = mv_camera_positions[i]
+                temp_batch["mvp_mtx"] = mvp_mtxs[i]
+                sliced_pic = self.renderer(**temp_batch)
+                sliced_pics.append(sliced_pic["comp_rgb"])
 
-        for name, value in self.cfg.loss.items():
-            self.log(f"train_params/{name}", self.C(value))
-        
-        return {"loss": loss}
+            row1 = torch.cat([sliced_pics[0], sliced_pics[1]], dim=2)  # 水平拼接
+            row2 = torch.cat([sliced_pics[2], sliced_pics[3]], dim=2)  # 水平拼接
+            combined_img = torch.cat([row1, row2], dim=1)  # 垂直拼接
+            #print(combined_img.shape)
+            combined_img_resized = combined_img.permute(0, 3, 1, 2)
+            combined_img_resized = F.interpolate(combined_img_resized, (512, 512), mode="bilinear", align_corners=False)
+            combined_img_resized = combined_img_resized.permute(0, 2, 3, 1)
+            #print(combined_img_resized.shape)
+
+            #save combined image
+            combined_img_save = combined_img * 255
+            combined_img_save = combined_img_save.byte()
+            #print(comp_rgb_img)
+            combined_img_save = Image.fromarray(combined_img_save.cpu().squeeze(0).numpy())
+            combined_img_save.save('combined_img_nerfrenderer_save.png')
+
+
+            cond_inp = out["comp_rgb"]
+
+
+
+            cond_inp = cond_inp.permute(0, 3, 1, 2)
+            cond_inp_resized = F.interpolate(cond_inp, (512, 512), mode="bilinear", align_corners=False)
+            cond_inp_resized = cond_inp_resized.permute(0, 2, 3, 1)
+
+
+            # render_batch = batch.copy()
+            # render_batch['height'] = 512
+            # render_batch['width'] = 512
+
+            # # print(mv_camera_positions)
+            # # print(render_batch["camera_positions"])
+            # guide_rgb = self.mesh_renderer(**render_batch)
+
+            # #4view mesh render
+            # rays_o,rays_d,mv_camera_positions,mvp_mtxs = creat4view_from_batch(**batch)
+            # sliced_pics = []
+            # for i in range(4):
+            #     temp_batch = batch.copy()
+            #     temp_batch["camera_positions"] = mv_camera_positions[i]
+            #     temp_batch["mvp_mtx"] = mvp_mtxs[i]
+            #     sliced_pic = self.mesh_renderer(**temp_batch)
+            #     sliced_pics.append(sliced_pic["comp_rgb"])
+            # row1 = torch.cat([sliced_pics[0], sliced_pics[1]], dim=2)  # 水平拼接
+            # row2 = torch.cat([sliced_pics[2], sliced_pics[3]], dim=2)  # 水平拼接
+            # combined_img = torch.cat([row1, row2], dim=1)  # 垂直拼接
+            # #save combined image
+            # combined_img_save = combined_img * 255
+            # combined_img_save = combined_img_save.byte()
+            # #print(comp_rgb_img)
+            # combined_img_save = Image.fromarray(combined_img_save.cpu().squeeze(0).numpy())
+            # combined_img_save.save('combined_img_save.png')
+
+
+            # #save guidance image
+            # guide_rgb_save = guide_rgb["comp_rgb"] * 255
+            # guide_rgb_save = guide_rgb_save.byte()
+            # #print(comp_rgb_img)
+            # guide_rgb_save = Image.fromarray(guide_rgb_save.cpu().squeeze(0).numpy())
+            # guide_rgb_save.save('guide_rgb_save.png')
+
+
+            # control_inp = sample_image(self.cfg.mesh_path,**batch)
+            # control_inp = torch.from_numpy(control_inp)
+            # control_inp = control_inp.unsqueeze(0)
+
+            # print(type(prompt_utils))
+            # print(list(batch.keys()))
+            # print(list(out.keys()))
+            
+
+
+
+            # guidance_out = self.guidance(
+            #     cond_inp_resized, guide_rgb["comp_rgb"], prompt_utils, rgb_as_latents=False, **batch
+            # )
+
+            # Self guidance
+            guidance_out = self.guidance(
+                combined_img_resized, combined_img_resized, prompt_utils, rgb_as_latents=False, **batch
+            )
+            loss = 0.0
+
+            # guidance_eval = guidance_out.get("eval")
+            # imgs_final = guidance_eval.get("imgs_final")
+            # imgs_1step = guidance_eval.get("imgs_1step")
+            # imgs_1orig = guidance_eval.get("imgs_1orig")
+            # imgs_noisy = guidance_eval.get("imgs_noisy")
+            #print(imgs_final.shape)
+
+            # imgs_final = (imgs_final + 1) * 0.5 * 255
+            # imgs_final = imgs_final.byte()
+            # imgs_final = Image.fromarray(imgs_final.cpu().squeeze(0).numpy())
+            # imgs_final.save('imgs_final.png')
+
+            # imgs_1step = (imgs_1step + 1) * 0.5 * 255
+            # imgs_1step = imgs_1step.byte()
+            # imgs_1step = Image.fromarray(imgs_1step.cpu().squeeze(0).numpy())
+            # imgs_1step.save('imgs_1step.png')
+
+            # imgs_1orig = (imgs_1orig + 1) * 0.5 * 255
+            # imgs_1orig = imgs_1orig.byte()
+            # imgs_1orig = Image.fromarray(imgs_1orig.cpu().squeeze(0).numpy())
+            # imgs_1orig.save('imgs_1orig.png')
+
+            # imgs_noisy = (imgs_noisy + 1) * 0.5 * 255
+            # imgs_noisy = imgs_noisy.byte()
+            # imgs_noisy = Image.fromarray(imgs_noisy.cpu().squeeze(0).numpy())
+            # imgs_noisy.save('imgs_noisy.png')
+
+
+
+            for name, value in guidance_out.items():
+                self.log(f"train/{name}", value)
+                if name.startswith("loss_"):
+                    loss += value * self.C(self.cfg.loss[name.replace("loss_", "lambda_")])
+
+            # if self.C(self.cfg.loss.lambda_orient) > 0:
+            #     if "normal" not in out:
+            #         raise ValueError(
+            #             "Normal is required for orientation loss, no normal is found in the output."
+            #         )
+            #     loss_orient = (
+            #         out["weights"].detach()
+            #         * dot(out["normal"], out["t_dirs"]).clamp_min(0.0) ** 2
+            #     ).sum() / (out["opacity"] > 0).sum()
+            #     self.log("train/loss_orient", loss_orient)
+            #     loss += loss_orient * self.C(self.cfg.loss.lambda_orient)
+
+            # loss_sparsity = (out["opacity"] ** 2 + 0.01).sqrt().mean()
+            # self.log("train/loss_sparsity", loss_sparsity)
+            # loss += loss_sparsity * self.C(self.cfg.loss.lambda_sparsity)
+
+            # opacity_clamped = out["opacity"].clamp(1.0e-3, 1.0 - 1.0e-3)
+            # loss_opaque = binary_cross_entropy(opacity_clamped, opacity_clamped)
+            # self.log("train/loss_opaque", loss_opaque)
+            # loss += loss_opaque * self.C(self.cfg.loss.lambda_opaque)
+
+            for name, value in self.cfg.loss.items():
+                self.log(f"train_params/{name}", self.C(value))
+            
+            return {"loss": loss}
 
     def validation_step(self, batch, batch_idx):
         out = self(batch)

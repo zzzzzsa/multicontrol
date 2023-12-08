@@ -45,7 +45,7 @@ class ControlNetGuidance(BaseObject):
 
         diffusion_steps: int = 20
 
-        view_dependent_prompting: bool = True
+        view_dependent_prompting: bool = False
         use_sds: bool = False
 
         """Maximum number of batch items to evaluate guidance for (for debugging) and to save on disk. -1 means save all items."""
