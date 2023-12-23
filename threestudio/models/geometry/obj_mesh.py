@@ -81,9 +81,17 @@ class OBJMesh(BaseExplicitGeometry):
             self.v_pos = torch.tensor(mesh.vertices, dtype=torch.float32).to(
                 self.device
             )
-            self.v_color = torch.tensor(
-                mesh.visual.vertex_colors[:, :3] / 255, dtype=torch.float32
-            ).to(self.device)
+            if hasattr(mesh.visual, 'vertex_colors'):
+                self.v_color = torch.tensor(
+                    mesh.visual.vertex_colors[:, :3] / 255, dtype=torch.float32
+                ).to(self.device)
+            else:
+                # 假设 mesh.vertices 的形状为 [N, 3]
+                gray_color = [0.75, 0.75, 0.75]  # 灰色
+                self.v_color = torch.tensor(
+                    [gray_color] * len(mesh.vertices), dtype=torch.float32
+                ).to(self.device)
+
             self.t_pos_idx = torch.tensor(mesh.faces, dtype=torch.int64).to(self.device)
 
         else:

@@ -34,8 +34,11 @@ def scale_tensor(
         tgt_scale = (0, 1)
 
     # 将inp_scale转换为相同设备上的张量
-    inp_scale_min = inp_scale[0].to(device)
-    inp_scale_max = inp_scale[1].to(device)
+    # inp_scale_min = inp_scale[0].to(device)
+    # inp_scale_max = inp_scale[1].to(device)
+
+    inp_scale_min = inp_scale[0]
+    inp_scale_max = inp_scale[1]
 
     if isinstance(tgt_scale, Tensor):
         assert dat.shape[-1] == tgt_scale.shape[-1]
@@ -322,7 +325,9 @@ def tet_sdf_diff(
 def creat4view_from_batch(camera_positions, fovy, width, height, **kwargs):
     device = camera_positions.device
     camera_positions_0 = camera_positions
-    rotation_axis = torch.tensor([0, 0, 1], device=device)
+    #rotation_axis = torch.tensor([0, 0, 1], device=device) # Rotate at z axis
+    rotation_axis = torch.rand(3, device=device)
+    rotation_axis = rotation_axis / rotation_axis.norm()
     rotation_angle = math.pi / 2 
 
     def create_rotation_matrix(angle, axis):

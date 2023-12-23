@@ -456,15 +456,13 @@ class ControlNetGuidance(BaseObject):
         azimuth: Float[Tensor, "B"],
         camera_distances: Float[Tensor, "B"],
         guidance_eval=False,
-        Use_cond=True,
         **kwargs,
     ):
         batch_size, H, W, _ = rgb.shape
         assert batch_size == 1
         #print(rgb.shape)
         #print(cond_rgb.shape)
-        if Use_cond: 
-            assert rgb.shape[:-1] == cond_rgb.shape[:-1]
+        assert rgb.shape[:-1] == cond_rgb.shape[:-1]
 
         rgb_BCHW = rgb.permute(0, 3, 1, 2)
         latents: Float[Tensor, "B 4 DH DW"]
@@ -476,11 +474,10 @@ class ControlNetGuidance(BaseObject):
             rgb_BCHW, (RH, RW), mode="bilinear", align_corners=False
         )
         latents = self.encode_images(rgb_BCHW_HW8)
-        if Use_cond: 
-            image_cond = self.prepare_image_cond(cond_rgb)
-            image_cond = F.interpolate(
-                image_cond, (RH, RW), mode="bilinear", align_corners=False
-            )
+        image_cond = self.prepare_image_cond(cond_rgb)
+        image_cond = F.interpolate(
+            image_cond, (RH, RW), mode="bilinear", align_corners=False
+        )
 
         temp = torch.zeros(1).to(rgb.device)
         text_embeddings = prompt_utils.get_text_embeddings(elevation, azimuth, camera_distances, self.cfg.view_dependent_prompting)
@@ -495,10 +492,7 @@ class ControlNetGuidance(BaseObject):
         )
 
         if self.cfg.use_sds:
-            if Use_cond:
-                grad, guidance_eval_utils = self.compute_grad_sds(text_embeddings, latents, image_cond, t)
-            else:
-                grad, guidance_eval_utils = self.compute_grad_sds_no_cond(text_embeddings, latents, t)
+            grad, guidance_eval_utils = self.compute_grad_sds(text_embeddings, latents, image_cond, t)
             grad = torch.nan_to_num(grad)
             if self.grad_clip_val is not None:
                 grad = grad.clamp(-self.grad_clip_val, self.grad_clip_val)
