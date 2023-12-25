@@ -17,5 +17,5 @@ for file in "$DIR"/*.obj; do
         system.background.random_aug=true
 
     # 暂停20秒
-    sleep 20
+    sleep 30
 done
